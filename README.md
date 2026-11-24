@@ -22,7 +22,7 @@ sequenceDiagram
     participant S as 2048.spiowm.dev
     B->>S: GET /move/left
     S->>S: move, spawn a tile, render the SVG
-    S-->>B: 303 to github.com/spiowm#make-a-move
+    S-->>B: 303 to github.com/spiowm#user-content-make-a-move
     B->>S: GET /board (through GitHub's image proxy)
     S-->>B: the new board
 ```
