@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from . import game
 from .render import board_svg
 
-PROFILE_URL = os.environ.get("PROFILE_URL", "https://github.com/spiowm#user-content-make-a-move")
+PROFILE_URL = os.environ.get("PROFILE_URL", "https://github.com/spiowm")
 DB_PATH = os.environ.get("DB_PATH", "/data/game.db")
 SECRET = os.environ.get("PLAYER_SALT", "dev-salt").encode()
 STATS_TOKEN = os.environ.get("STATS_TOKEN", "")

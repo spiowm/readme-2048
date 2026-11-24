@@ -22,7 +22,7 @@ sequenceDiagram
     participant S as 2048.spiowm.dev
     B->>S: GET /move/left
     S->>S: move, spawn a tile, render the SVG
-    S-->>B: 303 to github.com/spiowm#user-content-make-a-move
+    S-->>B: 303 back to github.com/spiowm
     B->>S: GET /board (through GitHub's image proxy)
     S-->>B: the new board
 ```
@@ -53,11 +53,10 @@ The board is at http://127.0.0.1:8000/board. Requests whose User-Agent looks lik
 ## Deploy
 
 ```bash
-docker build -t readme-2048 .
-docker run -p 8000:8000 -v readme-2048:/data --env-file .env readme-2048
+docker compose up -d --build
 ```
 
-Mine runs on Coolify with a persistent volume at `/data`. The settings are in [`.env.example`](.env.example).
+The compose file keeps the game in a named volume, so it survives redeploys. Mine runs on Coolify as a Docker Compose resource. The settings are in [`.env.example`](.env.example).
 
 ## License
 

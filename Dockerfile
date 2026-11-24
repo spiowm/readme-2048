@@ -6,6 +6,5 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 COPY app ./app
 ENV PATH="/srv/.venv/bin:$PATH" DB_PATH=/data/game.db
-VOLUME /data
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*", "--no-access-log"]

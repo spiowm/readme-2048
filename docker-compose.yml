@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    environment:
+      - PROFILE_URL=${PROFILE_URL:-https://github.com/spiowm}
+      - PLAYER_SALT=${PLAYER_SALT}
+      - STATS_TOKEN=${STATS_TOKEN}
+      - MIN_MOVE_INTERVAL=${MIN_MOVE_INTERVAL:-0.3}
+    volumes:
+      - game-data:/data
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  game-data:
