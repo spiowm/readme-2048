@@ -40,9 +40,7 @@ db = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
 db.execute("PRAGMA journal_mode=WAL")
 db.execute("PRAGMA synchronous=NORMAL")
 db.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)")
-db.execute(
-    "CREATE TABLE IF NOT EXISTS events (ts REAL, day TEXT, kind TEXT, player TEXT)"
-)
+db.execute("CREATE TABLE IF NOT EXISTS events (ts REAL, day TEXT, kind TEXT, player TEXT)")
 db.execute("CREATE INDEX IF NOT EXISTS events_day ON events(day, kind)")
 
 
@@ -68,9 +66,7 @@ def _save_state():
 
 
 state = _load_state()
-players = {
-    p for (p,) in db.execute("SELECT DISTINCT player FROM events WHERE kind='move'")
-}
+players = {p for (p,) in db.execute("SELECT DISTINCT player FROM events WHERE kind='move'")}
 state["players"] = len(players)
 last_move = {}
 svg_cache = board_svg(state)
@@ -159,9 +155,7 @@ def stats(token: str = ""):
             "FROM events GROUP BY day ORDER BY day DESC LIMIT 60"
         ).fetchall()
     return {
-        "days": [
-            {"day": d, "views": v, "moves": m, "players": p} for d, v, m, p in rows
-        ],
+        "days": [{"day": d, "views": v, "moves": m, "players": p} for d, v, m, p in rows],
         "players_total": len(players),
         "state": {k: state[k] for k in ("game", "moves", "score", "best", "status")},
     }

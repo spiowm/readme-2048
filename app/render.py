@@ -71,9 +71,7 @@ def board_svg(state):
             y = TOP + GAP + r * (CELL + GAP)
             v = state["board"][r][c]
             parts.append(
-                _tile(v, x, y)
-                if v
-                else f'<rect class="slot" x="{x}" y="{y}" width="{CELL}" height="{CELL}" rx="6"/>'
+                _tile(v, x, y) if v else f'<rect class="slot" x="{x}" y="{y}" width="{CELL}" height="{CELL}" rx="6"/>'
             )
 
     if state["status"] == "won":
@@ -83,8 +81,6 @@ def board_svg(state):
     else:
         n = state["players"]
         foot = f"Game #{state['game']} · move {state['moves']} · {n} player{'s' if n != 1 else ''} so far"
-    parts.append(
-        f'<text class="foot c" x="{W / 2}" y="{TOP + BOARD + 27}">{escape(foot)}</text>'
-    )
+    parts.append(f'<text class="foot c" x="{W / 2}" y="{TOP + BOARD + 27}">{escape(foot)}</text>')
     parts.append("</svg>")
     return "".join(parts)

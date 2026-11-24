@@ -40,7 +40,7 @@ def _slide_left(row):
 
 
 def _transpose(board):
-    return [list(col) for col in zip(*board)]
+    return [list(col) for col in zip(*board, strict=True)]
 
 
 def move(board, direction):
