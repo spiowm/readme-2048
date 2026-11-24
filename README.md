@@ -36,7 +36,7 @@ sequenceDiagram
 | Endpoint | |
 | --- | --- |
 | `GET /board` | Current board as SVG |
-| `GET /move/{left,up,down,right}` | Make a move and redirect to `PROFILE_URL` |
+| `GET /move/{left,up,down,right}` | Make a move and redirect to `PROFILE_URL`. If the board can't move that way, answer `204 No Content`, so the browser stays on the page without a reload |
 | `GET /stats?token=…` | Board views, moves and players per day |
 | `GET /static/v1/key-*.svg` | Arrow keys, cached for a year by camo and browsers |
 | `GET /health` | Liveness check |

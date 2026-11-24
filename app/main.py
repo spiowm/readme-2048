@@ -102,19 +102,22 @@ def board():
 def make_move(direction: str, request: Request):
     global state, svg_cache
     back = RedirectResponse(PROFILE_URL, status_code=303, headers=NO_CACHE)
+    # 204: браузер лишається на сторінці без перезавантаження, коли дошка не змінилась
+    stay = Response(status_code=204, headers=NO_CACHE)
     if request.method != "GET" or direction not in game.DIRECTIONS:
-        return back
+        return stay
     if BOT_UA.search(request.headers.get("user-agent", "")):
-        return back
+        return stay
 
     player = _player_id(request)
     now = time.monotonic()
     with lock:
         if now - last_move.get(player, 0) < MIN_INTERVAL:
-            return back
+            return stay
         last_move[player] = now
 
-        if state["status"] != "playing":
+        reset = state["status"] != "playing"
+        if reset:
             state = _new_state(state)
         new_board, gained, changed = game.move(state["board"], direction)
         if changed:
@@ -132,8 +135,10 @@ def make_move(direction: str, request: Request):
                 players.add(player)
                 state["players"] = len(players)
             _log("move", player)
-            _save_state()
-            svg_cache = board_svg(state)
+        if not (changed or reset):
+            return stay
+        _save_state()
+        svg_cache = board_svg(state)
     return back
 
 
