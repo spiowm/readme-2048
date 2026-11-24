@@ -24,7 +24,8 @@ TILES = {
 FONT = {1: 40, 2: 38, 3: 32, 4: 26}
 
 STYLE = (
-    "text{font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-weight:600}.t{font-size:20px}"
+    "text{font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;font-weight:600}"
+    ".t{font-size:20px}.f{font-size:17px}"
     ".grid{fill:#bbada0}.slot{fill:#cdc1b4}.t{fill:#59636e}.v{font-weight:700;fill:#1f2328}"
     ".c{text-anchor:middle;dominant-baseline:central;font-weight:700}"
     "@media (prefers-color-scheme:dark){.grid{fill:#3d444d}.slot{fill:#2d333b}.t{fill:#9198a1}.v{fill:#f0f6fc}}"
@@ -60,10 +61,10 @@ def board_svg(state):
     if state["status"] == "won":
         foot = "2048! Any arrow starts a new game"
     elif state["status"] == "lost":
-        foot = "No moves left. Any arrow starts a new game"
+        foot = "No moves left · any arrow restarts"
     else:
         n = state["players"]
         foot = f"game #{state['game']} · move {state['moves']} · {n} player{'s' if n != 1 else ''}"
-    parts.append(f'<text class="t" x="{W / 2}" y="{TOP + BOARD + 26}" text-anchor="middle">{escape(foot)}</text>')
+    parts.append(f'<text class="t f" x="{W / 2}" y="{TOP + BOARD + 26}" text-anchor="middle">{escape(foot)}</text>')
     parts.append("</svg>")
     return "".join(parts)

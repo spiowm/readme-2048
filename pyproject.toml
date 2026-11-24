@@ -10,7 +10,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff>=0.8"]
+dev = [
+    "httpx2>=2.16.2",
+    "pytest>=9.2.0",
+    "ruff>=0.8",
+]
 
 [tool.ruff]
 line-length = 120
@@ -18,3 +22,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

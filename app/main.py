@@ -2,10 +2,11 @@
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
-import random
 import re
+import secrets
 import sqlite3
 import threading
 import time
@@ -19,9 +20,11 @@ from .render import board_svg
 
 PROFILE_URL = os.environ.get("PROFILE_URL", "https://github.com/spiowm")
 DB_PATH = os.environ.get("DB_PATH", "/data/game.db")
-SECRET = os.environ.get("PLAYER_SALT", "dev-salt").encode()
 STATS_TOKEN = os.environ.get("STATS_TOKEN", "")
 MIN_INTERVAL = float(os.environ.get("MIN_MOVE_INTERVAL", "0.3"))
+# Скільки секунд після чужого ходу неможливий хід вважається кліком по застарілій дошці
+STALE_WINDOW = 120
+VIEW_FLUSH_SECONDS = 60
 
 BOT_UA = re.compile(
     r"bot|crawl|spider|slurp|preview|facebookexternalhit|telegram|discord|whatsapp|curl|wget|python",
@@ -32,6 +35,16 @@ NO_CACHE = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
+# https://www.cloudflare.com/ips/ (24.11.2026): лише від цих адрес довіряти CF-Connecting-IP
+CLOUDFLARE = [
+    ipaddress.ip_network(n)
+    for n in (
+        "173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 "
+        "190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 "
+        "104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 "
+        "2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32"
+    ).split()
+]
 
 # Статичні клавіші з «вічним» кешем: camo і браузер тримають їх у себе. Зміна вигляду = нова версія в шляху.
 STATIC_VERSION = "v1"
@@ -39,8 +52,6 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 STATIC = {name: open(os.path.join(STATIC_DIR, name), "rb").read() for name in os.listdir(STATIC_DIR)}
 IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
-app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-lock = threading.Lock()
 os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
 db = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
 db.execute("PRAGMA journal_mode=WAL")
@@ -48,6 +59,21 @@ db.execute("PRAGMA synchronous=NORMAL")
 db.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)")
 db.execute("CREATE TABLE IF NOT EXISTS events (ts REAL, day TEXT, kind TEXT, player TEXT)")
 db.execute("CREATE INDEX IF NOT EXISTS events_day ON events(day, kind)")
+db.execute("CREATE TABLE IF NOT EXISTS daily_views (day TEXT PRIMARY KEY, views INTEGER NOT NULL)")
+
+
+def _kv(key):
+    row = db.execute("SELECT v FROM kv WHERE k=?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def _salt():
+    """Сіль для хешу IP: зі змінної середовища або згенерована один раз і збережена в базі."""
+    if os.environ.get("PLAYER_SALT"):
+        return os.environ["PLAYER_SALT"].encode()
+    salt = _kv("salt") or secrets.token_urlsafe(24)
+    db.execute("INSERT OR IGNORE INTO kv VALUES ('salt', ?)", (salt,))
+    return salt.encode()
 
 
 def _new_state(prev=None):
@@ -63,37 +89,94 @@ def _new_state(prev=None):
 
 
 def _load_state():
-    row = db.execute("SELECT v FROM kv WHERE k='state'").fetchone()
-    return json.loads(row[0]) if row else _new_state()
+    """Стан з бази; пошкоджений або неповний запис замінюється новою партією, а не валить старт."""
+    try:
+        st = json.loads(_kv("state") or "null")
+        board = st["board"]
+        assert len(board) == 4 and all(len(row) == 4 for row in board)
+        assert st["status"] in ("playing", "won", "lost")
+        for key in ("score", "moves", "game", "best", "players"):
+            assert isinstance(st[key], int)
+        return st
+    except (TypeError, KeyError, ValueError, AssertionError):
+        return _new_state()
 
 
-def _save_state():
-    db.execute("INSERT OR REPLACE INTO kv VALUES ('state', ?)", (json.dumps(state),))
+def _day():
+    return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
+SALT = _salt()
 state = _load_state()
 players = {p for (p,) in db.execute("SELECT DISTINCT player FROM events WHERE kind='move'")}
 state["players"] = len(players)
-last_move = {}
 svg_cache = board_svg(state)
+last_move = {}  # гравець -> час останнього запиту на хід (monotonic)
+last_change = {"at": 0.0, "by": None}  # коли й ким востаннє змінено дошку
+pending_views = {}  # день -> перегляди, ще не записані в базу
+last_flush = time.monotonic()
+lock = threading.Lock()
+
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 
-def _log(kind, player=None):
-    now = time.time()
-    day = datetime.fromtimestamp(now, UTC).strftime("%Y-%m-%d")
-    db.execute("INSERT INTO events VALUES (?, ?, ?, ?)", (now, day, kind, player))
+def _flush_views():
+    """Перегляди пишуться пачкою раз на хвилину: картинка дошки не залежить від запису в базу."""
+    global last_flush
+    last_flush = time.monotonic()
+    try:
+        for day, n in list(pending_views.items()):
+            db.execute(
+                "INSERT INTO daily_views VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET views = views + excluded.views",
+                (day, n),
+            )
+            del pending_views[day]
+    except sqlite3.Error:
+        pass  # лічильник лишається в пам'яті до наступної спроби
+
+
+def _client_ip(request):
+    """Адреса гравця: CF-Connecting-IP лише коли запит справді прийшов від Cloudflare."""
+    peer = request.client.host if request.client else ""
+    try:
+        peer_ip = ipaddress.ip_address(peer)
+    except ValueError:
+        return peer or "unknown"
+    if any(peer_ip in net for net in CLOUDFLARE):
+        try:
+            return str(ipaddress.ip_address(request.headers.get("cf-connecting-ip", "").strip()))
+        except ValueError:
+            pass
+    return peer
 
 
 def _player_id(request):
-    # За проксі Cloudflare справжня адреса в CF-Connecting-IP; без нього адреса з'єднання
-    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "unknown")
-    return hmac.new(SECRET, ip.encode(), hashlib.sha256).hexdigest()[:16]
+    return hmac.new(SALT, _client_ip(request).encode(), hashlib.sha256).hexdigest()[:16]
+
+
+def _is_click(request):
+    """Відсіює префетч, прев'ю й ботів: хід робить лише навігація людини по посиланню."""
+    if request.method != "GET" or BOT_UA.search(request.headers.get("user-agent", "")):
+        return False
+    mode = request.headers.get("sec-fetch-mode")
+    purpose = (request.headers.get("sec-purpose") or request.headers.get("purpose") or "").lower()
+    return (mode is None or mode == "navigate") and "prefetch" not in purpose
+
+
+def _prune(now):
+    if len(last_move) > 10_000:
+        for player, at in list(last_move.items()):
+            if now - at > STALE_WINDOW:
+                del last_move[player]
 
 
 @app.get("/board")
 def board():
     with lock:
-        _log("view")
+        day = _day()
+        pending_views[day] = pending_views.get(day, 0) + 1
+        if time.monotonic() - last_flush > VIEW_FLUSH_SECONDS:
+            _flush_views()
         body = svg_cache
     return Response(body, media_type="image/svg+xml", headers=NO_CACHE)
 
@@ -104,41 +187,60 @@ def make_move(direction: str, request: Request):
     back = RedirectResponse(PROFILE_URL, status_code=303, headers=NO_CACHE)
     # 204: браузер лишається на сторінці без перезавантаження, коли дошка не змінилась
     stay = Response(status_code=204, headers=NO_CACHE)
-    if request.method != "GET" or direction not in game.DIRECTIONS:
-        return stay
-    if BOT_UA.search(request.headers.get("user-agent", "")):
+    if direction not in game.DIRECTIONS or not _is_click(request):
         return stay
 
     player = _player_id(request)
-    now = time.monotonic()
     with lock:
-        if now - last_move.get(player, 0) < MIN_INTERVAL:
+        now = time.monotonic()
+        prev = last_move.get(player)
+        if prev is not None and now - prev < MIN_INTERVAL:
             return stay
         last_move[player] = now
+        _prune(now)
 
+        # Новий стан рахується окремо й підміняє поточний лише після успішного запису в базу
         reset = state["status"] != "playing"
-        if reset:
-            state = _new_state(state)
-        new_board, gained, changed = game.move(state["board"], direction)
-        if changed:
-            state["board"] = new_board
-            state["score"] += gained
-            state["moves"] += 1
-            state["best"] = max(state["best"], state["score"])
-            if game.has_goal(new_board):
-                state["status"] = "won"
-            else:
-                game.spawn(new_board)
-                if not game.can_move(new_board):
-                    state["status"] = "lost"
-            if player not in players:
-                players.add(player)
-                state["players"] = len(players)
-            _log("move", player)
+        new = _new_state(state) if reset else dict(state)
+        board_after, gained, changed = game.move(new["board"], direction)
         if not (changed or reset):
+            # Неможливий хід. Якщо після попереднього запиту гравця дошку змінив хтось інший,
+            # він, найімовірніше, бачить стару картинку: оновити сторінку замість тиші.
+            seen = prev if prev is not None else now - STALE_WINDOW
+            if last_change["at"] > seen and last_change["by"] != player:
+                return back
             return stay
-        _save_state()
-        svg_cache = board_svg(state)
+
+        is_new = changed and player not in players
+        if changed:
+            new["board"] = board_after
+            new["score"] += gained
+            new["moves"] += 1
+            new["best"] = max(new["best"], new["score"])
+            if game.has_goal(board_after):
+                new["status"] = "won"
+            else:
+                game.spawn(board_after)
+                if not game.can_move(board_after):
+                    new["status"] = "lost"
+            new["players"] = len(players) + is_new
+        svg = board_svg(new)
+
+        try:
+            db.execute("BEGIN")
+            db.execute("INSERT OR REPLACE INTO kv VALUES ('state', ?)", (json.dumps(new),))
+            if changed:
+                db.execute("INSERT INTO events VALUES (?, ?, 'move', ?)", (time.time(), _day(), player))
+            db.execute("COMMIT")
+        except sqlite3.Error:
+            if db.in_transaction:
+                db.execute("ROLLBACK")
+            return Response(status_code=503, headers=NO_CACHE)
+
+        state, svg_cache = new, svg
+        if is_new:
+            players.add(player)
+        last_change.update(at=now, by=player)
     return back
 
 
@@ -167,18 +269,22 @@ def health():
 
 @app.get("/stats")
 def stats(token: str = ""):
-    if not STATS_TOKEN or not hmac.compare_digest(token, STATS_TOKEN):
-        return JSONResponse({"error": "forbidden"}, status_code=403)
+    if not STATS_TOKEN or not hmac.compare_digest(token.encode(), STATS_TOKEN.encode()):
+        return JSONResponse({"error": "forbidden"}, status_code=403, headers=NO_CACHE)
     with lock:
-        rows = db.execute(
-            "SELECT day, SUM(kind='view'), SUM(kind='move'), COUNT(DISTINCT CASE WHEN kind='move' THEN player END) "
-            "FROM events GROUP BY day ORDER BY day DESC LIMIT 60"
-        ).fetchall()
-    return {
-        "days": [{"day": d, "views": v, "moves": m, "players": p} for d, v, m, p in rows],
-        "players_total": len(players),
-        "state": {k: state[k] for k in ("game", "moves", "score", "best", "status")},
-    }
-
-
-random.seed()
+        _flush_views()
+        days = {}
+        # Старі перегляди лежать подіями 'view', нові агрегатами по днях
+        for day, n in db.execute("SELECT day, COUNT(*) FROM events WHERE kind='view' GROUP BY day"):
+            days.setdefault(day, {"views": 0, "moves": 0, "players": 0})["views"] += n
+        for day, n in db.execute("SELECT day, views FROM daily_views"):
+            days.setdefault(day, {"views": 0, "moves": 0, "players": 0})["views"] += n
+        for day, n in pending_views.items():
+            days.setdefault(day, {"views": 0, "moves": 0, "players": 0})["views"] += n
+        moves = "SELECT day, COUNT(*), COUNT(DISTINCT player) FROM events WHERE kind='move' GROUP BY day"
+        for day, m, p in db.execute(moves):
+            days.setdefault(day, {"views": 0, "moves": 0, "players": 0}).update(moves=m, players=p)
+        snapshot = {k: state[k] for k in ("game", "moves", "score", "best", "status")}
+        total = len(players)
+    rows = [{"day": d, **v} for d, v in sorted(days.items(), reverse=True)[:60]]
+    return JSONResponse({"days": rows, "players_total": total, "state": snapshot}, headers=NO_CACHE)
