@@ -85,7 +85,8 @@ def _log(kind, player=None):
 
 
 def _player_id(request):
-    ip = request.client.host if request.client else "unknown"
+    # За проксі Cloudflare справжня адреса в CF-Connecting-IP; без нього адреса з'єднання
+    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "unknown")
     return hmac.new(SECRET, ip.encode(), hashlib.sha256).hexdigest()[:16]
 
 

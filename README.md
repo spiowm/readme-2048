@@ -28,9 +28,9 @@ sequenceDiagram
 ```
 
 - **Speed.** A move with rendering takes about 30 µs, and the SVG is rendered once per move and kept in memory. Almost all of the delay a player sees is GitHub reloading the profile page.
-- **Fresh image.** `/board` is sent with `Cache-Control: no-cache, no-store`, so GitHub's image proxy (camo) fetches it on every page view. The path has no `.svg` extension, and the domain is not behind a CDN cache.
+- **Fresh image.** `/board` is sent with `Cache-Control: no-cache, no-store`, so GitHub's image proxy (camo) fetches it on every page view. The path has no `.svg` extension. The domain sits behind Cloudflare as a proxy only (`cf-cache-status: DYNAMIC`): camo then connects to a nearby Cloudflare node instead of opening a new connection to the server, which cut about 350 ms per board.
 - **One board for everyone.** Images in a README go through camo without cookies, so there is no way to tell players apart on the image side.
-- **Abuse.** Each player can move at most once every 0.3 s, known bots and link previews are ignored, and `robots.txt` disallows everything. Players are counted by a salted hash of the IP address; raw IPs are never stored.
+- **Abuse.** Each player can move at most once every 0.3 s, known bots and link previews are ignored, and `robots.txt` disallows everything. Players are counted by a salted hash of the IP address (`CF-Connecting-IP` behind Cloudflare); raw IPs are never stored.
 - **Rules.** The move logic matches [2048-solver](https://github.com/spiowm/2048-solver) on 50,000 random boards. A tile is 2 with probability 0.9 and 4 otherwise.
 
 | Endpoint | |
