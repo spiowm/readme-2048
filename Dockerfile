@@ -4,6 +4,7 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_NO_DEV=1
 WORKDIR /srv
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
 COPY app ./app
 ENV PATH="/srv/.venv/bin:$PATH" DB_PATH=/data/game.db
 VOLUME /data

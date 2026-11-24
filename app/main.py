@@ -162,3 +162,23 @@ def stats(token: str = ""):
 
 
 random.seed()
+
+
+@app.get("/exp/tick")
+async def exp_tick():
+    """Тимчасова перевірка: чи пропускає camo GIF-стрім (кадр щосекунди, 90 с)."""
+    import asyncio
+
+    from fastapi.responses import StreamingResponse
+
+    from . import gifstream
+
+    async def gen():
+        yield gifstream.header()
+        for i in range(90):
+            st = dict(state, note=None)
+            yield gifstream.frame(gifstream.render(st, note=f"tick {i}"))
+            await asyncio.sleep(1)
+        yield gifstream.TRAILER
+
+    return StreamingResponse(gen(), media_type="image/gif", headers=NO_CACHE)
