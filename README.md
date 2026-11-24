@@ -38,6 +38,7 @@ sequenceDiagram
 | `GET /board` | Current board as SVG |
 | `GET /move/{left,up,down,right}` | Make a move and redirect to `PROFILE_URL` |
 | `GET /stats?token=…` | Board views, moves and players per day |
+| `GET /static/v1/key-*.svg` | Arrow keys, cached for a year by camo and browsers |
 | `GET /health` | Liveness check |
 
 ## Run locally

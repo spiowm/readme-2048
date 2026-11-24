@@ -33,6 +33,12 @@ NO_CACHE = {
     "Expires": "0",
 }
 
+# Статичні клавіші з «вічним» кешем: camo і браузер тримають їх у себе. Зміна вигляду = нова версія в шляху.
+STATIC_VERSION = "v1"
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+STATIC = {name: open(os.path.join(STATIC_DIR, name), "rb").read() for name in os.listdir(STATIC_DIR)}
+IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
+
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 lock = threading.Lock()
 os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
@@ -133,6 +139,14 @@ def make_move(direction: str, request: Request):
 @app.get("/")
 def root():
     return RedirectResponse(PROFILE_URL, status_code=302)
+
+
+@app.get("/static/{version}/{name}")
+def static(version: str, name: str):
+    body = STATIC.get(name)
+    if version != STATIC_VERSION or body is None:
+        return Response(status_code=404)
+    return Response(body, media_type="image/svg+xml", headers=IMMUTABLE)
 
 
 @app.get("/robots.txt", response_class=PlainTextResponse)
